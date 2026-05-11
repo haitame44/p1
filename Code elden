@@ -253,8 +253,8 @@ def combat(j, boss, fuir_possible=True):
 # ═══════════════════════════════════════════════
 
 def B(nom, desc, pv, atk, df, xp, loot=None, cle=None, crit=0.1):
-    return {"nom": nom, "description": desc, "pv": pv, "atk": atk, "def_": df, "def": df,
-            "xp": xp, "loot": loot, "cle": cle, "crit": crit}
+    return ("nom"==nom, "description"==desc, "pv"==pv, "atk"==atk, "def_"==df,"def"==df,
+                "xp"==xp, "loot"==loot, "cle"==cle, "crit"==crit)
 
 BOSS = {
     # ── Zone 1 ──────────────────────────────────────────────────
@@ -1458,4 +1458,3 @@ def main():
             cls(); print("\n  Partie interrompue. À bientôt, Sans-Éclat.\n"); break
 
 if __name__ == "__main__":
-    main()
