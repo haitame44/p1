@@ -1,0 +1,1461 @@
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║        ELDEN RING — L'ANNEAU BRISÉ  v2.0  (RPG Python)          ║
+║     Arbre narratif profond + Combats + Fins multiples            ║
+║     Lancez avec F5 dans Spyder ou : python elden_ring_v2.py      ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+
+import time, random, os, sys
+
+# ═══════════════════════════════════════════════
+#  UTILITAIRES
+# ═══════════════════════════════════════════════
+
+def cls():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def pause(s=1.0): time.sleep(s)
+
+def lent(texte, d=0.025):
+    for c in texte:
+        print(c, end='', flush=True)
+        time.sleep(d)
+    print()
+
+def titre(t):
+    b = "═" * (len(t) + 4)
+    print(f"\n  {b}\n  ║ {t} ║\n  {b}\n")
+
+def bv(cur, mx, l=28, col="r"):
+    r = int(l * cur / max(mx,1))
+    bar = ("█" if col=="r" else "▓") * r + "░" * (l - r)
+    return f"[{bar}] {cur}/{mx}"
+
+def statut(j):
+    print(f"\n  ┌─ {j['nom']} ─ Niv.{j['niveau']} ─ {j['classe']} ─────────────────")
+    print(f"  │  ❤  Vie     : {bv(j['pv'], j['pv_max'])}")
+    print(f"  │  ⚡ Stamina : {bv(j['stamina'], j['stamina_max'], col='g')}")
+    print(f"  │  ⚔  ATK {j['attaque']}  🛡 DEF {j['defense']}  💰 {j['runes']} Runes  XP {j['xp']}/{j['xp_prochain']}")
+    flags = []
+    if j.get('serment_loup'):   flags.append("🐺 Serment du Loup")
+    if j.get('alliance_ombre'): flags.append("🌑 Alliance Ombre")
+    if j.get('foi_erdtree'):    flags.append("🌿 Foi Erdtree")
+    if j.get('sang_dragon'):    flags.append("🔥 Sang Dragon")
+    if j.get('traître'):        flags.append("💀 Traître")
+    if flags: print(f"  │  {' | '.join(flags)}")
+    print(f"  └──────────────────────────────────────────────────\n")
+
+def choix(options):
+    for i, o in enumerate(options, 1):
+        print(f"  [{i}] {o}")
+    while True:
+        try:
+            c = int(input("\n  ➤ "))
+            if 1 <= c <= len(options): return c - 1
+        except: pass
+        print("  ❌ Invalide.")
+
+def xp_up(j, xp, runes=0):
+    j['xp'] += xp
+    j['runes'] += runes
+    print(f"\n  ✨ +{xp} XP  +{runes} Runes")
+    while j['xp'] >= j['xp_prochain']:
+        j['xp'] -= j['xp_prochain']
+        j['niveau'] += 1
+        j['xp_prochain'] = int(j['xp_prochain'] * 1.6)
+        j['pv_max'] = int(j['pv_max'] * 1.18)
+        j['pv'] = j['pv_max']
+        j['attaque'] += 4
+        j['defense'] += 2
+        j['stamina_max'] += 12
+        j['stamina'] = j['stamina_max']
+        print(f"\n  🎉 NIVEAU {j['niveau']} ! ATK↑ DEF↑ PV Max : {j['pv_max']}")
+    pause(1)
+
+def soigner(j, pct=0.5):
+    s = int(j['pv_max'] * pct)
+    j['pv'] = min(j['pv_max'], j['pv'] + s)
+    return s
+
+def estus_dispo(j):
+    for it in j['inventaire']:
+        if 'Estus' in it: return True
+    return False
+
+def utiliser_estus(j):
+    for i, it in enumerate(j['inventaire']):
+        if 'Estus' in it:
+            nb = int(it.split('x')[1])
+            s = soigner(j)
+            nb -= 1
+            if nb <= 0: j['inventaire'].pop(i)
+            else: j['inventaire'][i] = f"Estus Flask x{nb}"
+            return s
+    return 0
+
+def ajouter_item(j, item):
+    j['inventaire'].append(item)
+    print(f"  🎁 Obtenu : {item}")
+
+# ═══════════════════════════════════════════════
+#  CRÉATION DU PERSONNAGE
+# ═══════════════════════════════════════════════
+
+CLASSES = {
+    "Guerrier":   dict(pv=160, stamina=110, attaque=22, defense=13, desc="Maître du corps-à-corps. Solide et puissant."),
+    "Vagabond":   dict(pv=130, stamina=120, attaque=19, defense=11, desc="Équilibré. Parfait pour débuter."),
+    "Astrologue": dict(pv=95,  stamina=85,  attaque=30, defense=6,  desc="Magie dévastatrice. Très fragile."),
+    "Héros":      dict(pv=200, stamina=95,  attaque=24, defense=16, desc="Tank. Lent mais indestructible."),
+    "Bandit":     dict(pv=115, stamina=130, attaque=25, defense=8,  desc="Esquives rapides. Critique élevé."),
+    "Prophète":   dict(pv=110, stamina=100, attaque=20, defense=9,  desc="Incantations de feu et de lumière."),
+}
+
+def creer_joueur():
+    cls()
+    titre("CRÉATION DU SANS-ÉCLAT")
+    nom = input("  Nom de votre personnage : ").strip() or "Sans-Éclat"
+    print()
+    noms = list(CLASSES.keys())
+    for i, (cn, cs) in enumerate(CLASSES.items(), 1):
+        print(f"  [{i}] {cn:12s}  ❤{cs['pv']}  ⚔{cs['attaque']}  🛡{cs['defense']}")
+        print(f"       {cs['desc']}\n")
+    idx = choix(noms)
+    cl = noms[idx]
+    cs = CLASSES[cl]
+    j = dict(
+        nom=nom, classe=cl,
+        pv=cs['pv'], pv_max=cs['pv'],
+        stamina=cs['stamina'], stamina_max=cs['stamina'],
+        attaque=cs['attaque'], defense=cs['defense'],
+        runes=0, niveau=1, xp=0, xp_prochain=100,
+        inventaire=["Estus Flask x5"],
+        boss_tues=[], objets_cles=[],
+        # flags narratifs
+        serment_loup=False, alliance_ombre=False,
+        foi_erdtree=False, sang_dragon=False, traître=False,
+        melina_vivante=True, torrent=False,
+        fin_choisie=None,
+    )
+    cls()
+    lent(f"\n  Bienvenue, {nom} le {cl}. La Terre Entre vous appelle…")
+    pause(2)
+    return j
+
+# ═══════════════════════════════════════════════
+#  SYSTÈME DE COMBAT
+# ═══════════════════════════════════════════════
+
+def combat(j, boss, fuir_possible=True):
+    """Retourne True = victoire, False = mort/fuite."""
+    cls()
+    titre(f"⚔  {boss['nom'].upper()}")
+    lent(f"  {boss['description']}")
+    pause(1.5)
+
+    pv_b = boss['pv']
+    pv_b_max = boss['pv']
+    esquive = False
+    tour = 0
+
+    while pv_b > 0 and j['pv'] > 0:
+        cls()
+        print(f"\n  ══ COMBAT : {boss['nom']} ══")
+        print(f"  🧑 {j['nom']}    {bv(j['pv'], j['pv_max'])}")
+        print(f"  👹 {boss['nom']} {bv(pv_b, pv_b_max)}")
+        print(f"  ⚡ Stamina      {bv(j['stamina'], j['stamina_max'], col='g')}")
+        if pv_b < pv_b_max * 0.3:
+            print("  ⚠  PHASE DE RAGE ACTIVÉE !")
+        tour += 1
+        print(f"  Tour {tour}\n")
+
+        opts = [
+            "Attaque normale",
+            "Attaque puissante  (×1.9 / -20 stamina)",
+            "Esquive & riposte  (-15 stamina)",
+            f"Estus Flask {'✓' if estus_dispo(j) else '✗(épuisé)'}",
+        ]
+        if fuir_possible: opts.append("Fuir le combat")
+
+        c = choix(opts)
+
+        if c == 0:
+            dmg = max(1, j['attaque'] + random.randint(-4, 6) - boss['def'])
+            pv_b -= dmg
+            j['stamina'] = max(0, j['stamina'] - 8)
+            print(f"\n  ⚔  Coup normal : {dmg} dégâts !")
+        elif c == 1:
+            if j['stamina'] < 20:
+                print("\n  💨 Stamina insuffisante !"); pause(1); continue
+            dmg = max(1, int(j['attaque'] * 1.9) + random.randint(-2,5) - boss['def'])
+            pv_b -= dmg
+            j['stamina'] -= 20
+            print(f"\n  🔥 Attaque puissante : {dmg} dégâts !")
+        elif c == 2:
+            if j['stamina'] < 15:
+                print("\n  💨 Stamina insuffisante !"); pause(1); continue
+            j['stamina'] -= 15
+            esquive = True
+            dmg = max(1, int(j['attaque'] * 1.4) - boss['def'])
+            pv_b -= dmg
+            print(f"\n  💨 Esquive + riposte : {dmg} dégâts !")
+        elif c == 3:
+            if estus_dispo(j):
+                s = utiliser_estus(j)
+                print(f"\n  🍶 Estus Flask : +{s} PV")
+            else:
+                print("\n  ❌ Plus d'Estus !"); pause(1); continue
+        elif c == 4:
+            if random.random() < 0.45:
+                print("\n  🏃 Vous fuyez !"); pause(1); return False
+            else:
+                print("\n  ❌ Impossible de fuir !")
+
+        # Regen stamina
+        j['stamina'] = min(j['stamina_max'], j['stamina'] + 10)
+
+        # Attaque boss
+        if pv_b > 0:
+            if esquive:
+                print(f"\n  ✨ Attaque de {boss['nom']} esquivée !")
+                esquive = False
+            else:
+                mult = 1.6 if pv_b < pv_b_max * 0.3 else 1.0
+                crit = random.random() < boss.get('crit', 0.1)
+                dmg_b = max(1, int((boss['atk'] * mult * (1.8 if crit else 1.0))
+                                   + random.randint(-3, 5) - j['defense'] * 0.6))
+                j['pv'] -= dmg_b
+                pfx = "💥 CRITIQUE ! " if crit else "💥 "
+                print(f"\n  {pfx}{boss['nom']} frappe : {dmg_b} dégâts !")
+        pause(0.9)
+
+    # Résultat
+    if j['pv'] <= 0:
+        cls(); titre("☠  VOUS ÊTES MORT")
+        lent(f"  {boss['nom']} vous a vaincu. Vos Runes sont perdues.")
+        j['runes'] = 0
+        j['pv'] = max(1, int(j['pv_max'] * 0.25))
+        pause(2); return False
+    else:
+        cls(); titre(f"🏆  {boss['nom'].upper()} VAINCU !")
+        lent(f"\n  Vous avez triomphé de {boss['nom']} !")
+        xp_up(j, boss['xp'], boss['xp'])
+        if boss.get('loot'):
+            ajouter_item(j, boss['loot'])
+        if boss.get('cle'):
+            j['objets_cles'].append(boss['cle'])
+            print(f"  🔑 Objet clé : {boss['cle']}")
+        j['boss_tues'].append(boss['nom'])
+        pause(2); return True
+
+# ═══════════════════════════════════════════════
+#  DÉFINITION DES BOSS
+# ═══════════════════════════════════════════════
+
+def B(nom, desc, pv, atk, df, xp, loot=None, cle=None, crit=0.1):
+    return {"nom": nom, "description": desc, "pv": pv, "atk": atk, "def_": df, "def": df,
+            "xp": xp, "loot": loot, "cle": cle, "crit": crit}
+
+BOSS = {
+    # ── Zone 1 ──────────────────────────────────────────────────
+    "loup_gris": B("Loup Gris des Ruines","Une bête colossale gardant les ruines ancestrales.",
+                   160, 18, 4, 50, "Croc du Loup"),
+    "pillard_chef": B("Chef des Pillards","Le chef d'une bande de mercenaires sans pitié.",
+                      200, 22, 6, 65, "Épée Brisée +1"),
+    "chevalier_rouge": B("Chevalier Rouge","Un ancien chevalier de l'Erdtree, corrompu par la jalousie.",
+                         240, 26, 8, 80, "Armure Écarlate", crit=0.15),
+    # ── Zone 2 ──────────────────────────────────────────────────
+    "margit": B("Margit, la Contrainte Sombre",
+                "Un vieillard à la force colossale. Son marteau de lumière peut tuer en deux frappes.",
+                320, 34, 10, 130, "Talisman de Margit", "Sceau de Stormveil", crit=0.12),
+    "garde_tour": B("Garde de la Tour Noire","Silencieux, implacable. Il protège un secret.",
+                    270, 28, 9, 95, "Clé de la Tour"),
+    "spectre_arene": B("Spectre de l'Arène","Une ombre née du sang versé dans l'arène oubliée.",
+                       250, 30, 7, 90, "Âme Condensée"),
+    # ── Zone 3 ──────────────────────────────────────────────────
+    "godrick": B("Godrick le Greffé",
+                 "Seigneur dégénéré de Stormveil. Il greffe des membres de dragon sur son corps.",
+                 480, 42, 13, 210, "Grande Rune de Godrick", "Fragment I", crit=0.13),
+    "commandant_niall": B("Commandant Niall","Un vétéran de guerre aux jambes de fer. Invoque des fantômes.",
+                          400, 38, 12, 170, "Cape de Niall"),
+    # ── Zone 4 ──────────────────────────────────────────────────
+    "rennala": B("Rennala, Reine de la Pleine Lune",
+                 "Reine des mages. Elle lance des astres et invoque des créatures lunaires.",
+                 440, 46, 6, 230, "Grande Rune de Rennala", "Fragment II", crit=0.10),
+    "sorcier_noir": B("Sorcier Noir Miriel","Un traître de l'académie ayant vendu son âme aux ombres.",
+                      360, 44, 5, 180, "Grimoire Maudit"),
+    "godfrey_fantome": B("Fantôme de Godfrey","L'ombre du premier Elden Lord. Un test de valeur.",
+                         500, 48, 14, 250, "Hache Colossale de Godfrey"),
+    # ── Zone 5 ──────────────────────────────────────────────────
+    "radahn": B("Starscourge Radahn",
+                "Le demi-dieu qui retient les étoiles. Deux épées colossales, un cheval minuscule.",
+                620, 54, 16, 300, "Grande Rune de Radahn", "Fragment III", crit=0.14),
+    "malenia": B("Malénia, Lame de Miquella",
+                 "Vainqueuse de Radahn. Chaque coup soigne ses blessures. La plus redoutable.",
+                 700, 60, 8, 380, "Fleur d'Or de Malénia", "Fragment IV", crit=0.20),
+    "mohg": B("Mohg, Seigneur du Sang",
+              "Dieu du sang cachés dans les profondeurs. Il maudit votre sang à chaque touche.",
+              580, 52, 12, 290, "Grande Rune de Mohg", "Fragment V", crit=0.15),
+    # ── Zone 6 ──────────────────────────────────────────────────
+    "maliketh": B("Maliketh, la Lame Noire",
+                  "Bête gardienne de Marika. Sa lame noire réduit votre vie max à chaque coup.",
+                  750, 62, 19, 360, "Lame Noire", "Destins Cruciaux", crit=0.16),
+    "ombre_melina": B("Ombre de Mélina","Si vous l'avez trahie, son spectre vous traque.",
+                      600, 55, 10, 300, "Larme de Mélina"),
+    # ── Boss Final ──────────────────────────────────────────────
+    "radagon": B("Radagon de l'Étoile d'Or",
+                 "Le consort de Marika. Il est elle, elle est lui. Son marteau frappe la foi.",
+                 850, 68, 20, 420, None, None, crit=0.15),
+    "elden_beast": B("La Bête Dorée",
+                     "L'incarnation cosmique de l'Anneau Brisé. Un être d'une puissance incommensurable.",
+                     1000, 75, 22, 500, "L'Anneau Brisé Restauré", None, crit=0.12),
+    "dieu_sombre": B("Le Dieu Sombre Sans Nom",
+                     "Une entité oubliée avant l'Erdtree. Celui qui offre le vrai pouvoir aux Sans-Éclat.",
+                     950, 78, 15, 480, "Couronne Absolue", None, crit=0.18),
+}
+
+# ═══════════════════════════════════════════════
+#  NŒUDS NARRATIFS (arbre de décisions)
+#  Chaque fonction = un nœud.
+#  Elle retourne un identifiant de prochain nœud (str).
+# ═══════════════════════════════════════════════
+
+# ────────────────────────────────────────────────────────
+#  PROLOGUE
+# ────────────────────────────────────────────────────────
+
+def n_prologue(j):
+    cls(); titre("PROLOGUE — L'APPEL DE LA GRÂCE")
+    lent("  Vous vous réveillez dans une crypte souterraine.\n"
+         "  Une voix douce résonne dans votre tête : celle de Mélina.\n"
+         "  « Sans-Éclat... la grâce vous guide. Levez-vous. »\n"
+         "  Deux chemins se présentent dès la sortie de la crypte.")
+    pause(1)
+    statut(j)
+    print("  Un carrefour vous attend. Que faites-vous ?")
+    c = choix([
+        "Suivre la lumière d'or vers le nord (chemin de la Grâce)",
+        "Descendre vers les ruines au sud (chemin de l'Ombre)",
+        "Examiner la crypte avant de partir",
+    ])
+    if c == 0: return "limgrave_grace"
+    if c == 1: return "ruines_ombre"
+    # c == 2
+    cls()
+    lent("  Vous fouilllez la crypte. Derrière une dalle brisée,\n"
+         "  vous trouvez un grimoire poussièreux et 150 Runes.")
+    j['runes'] += 150
+    ajouter_item(j, "Grimoire Ancestral")
+    pause(1.5)
+    print("\n  Maintenant, quelle direction ?")
+    c2 = choix([
+        "Vers le nord (chemin de la Grâce)",
+        "Vers le sud (chemin de l'Ombre)",
+    ])
+    return "limgrave_grace" if c2 == 0 else "ruines_ombre"
+
+# ────────────────────────────────────────────────────────
+#  BRANCHE A — CHEMIN DE LA GRÂCE (nord)
+# ────────────────────────────────────────────────────────
+
+def n_limgrave_grace(j):
+    cls(); titre("🌿  LIMGRAVE — Plaines de la Grâce")
+    lent("  Les plaines dorées de Limgrave s'étendent à perte de vue.\n"
+         "  Un arbre lumineux domine l'horizon. Mélina apparaît à vos côtés.\n"
+         "  « Je peux vous offrir Torrent, mon destrier spirituel. »")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Accepter Torrent et aller vers Stormveil Castle",
+        "Refuser Torrent et explorer seul à pied",
+        "Demander à Mélina ce qu'elle sait de l'Anneau Brisé",
+        "Chercher un campement de pillards signalé à l'est",
+    ])
+    if c == 0:
+        j['torrent'] = True
+        ajouter_item(j, "Sifflet de Torrent")
+        lent("\n  Torrent surgit dans un souffle d'émeraude.\n"
+             "  Vous êtes désormais le cavalier du vent.")
+        pause(1)
+        return "stormveil_entree"
+    if c == 1:
+        lent("\n  Mélina hoche la tête, respectueuse.\n"
+             "  « Comme vous voudrez. Je reste à vos côtés. »")
+        pause(1)
+        return "stormveil_entree"
+    if c == 2:
+        cls()
+        lent("  Mélina vous révèle que l'Anneau Brisé fut fragmenté\n"
+             "  entre six demi-dieux lors de la Shattering.\n"
+             "  « Rassemblez leurs Grandes Runes. Devenez Elden Lord. »\n"
+             "  Vous gagnez une compréhension accrue de la Terre Entre.")
+        xp_up(j, 30, 0)
+        j['foi_erdtree'] = True
+        pause(1)
+        return "limgrave_grace"  # retour menu zone
+    # c == 3
+    cls()
+    lent("  Le campement est plus grand que prévu.\n"
+         "  Le chef des pillards vous repère.")
+    victoire = combat(j, BOSS['pillard_chef'])
+    if not victoire:
+        lent("  Vous battez en retraite vers le site de grâce.")
+        return "limgrave_grace"
+    return "stormveil_entree"
+
+def n_stormveil_entree(j):
+    cls(); titre("🏰  STORMVEIL — Aux Portes")
+    lent("  Les remparts de Stormveil se dressent, balayés par l'orage.\n"
+         "  Un chevalier énorme bloque la porte principale : Margit.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Affronter Margit de front",
+        "Chercher un passage secret sur le flanc gauche",
+        "Soudoyer la sentinelle corrompue (200 Runes)",
+        "Retourner à Limgrave s'entraîner",
+    ])
+    if c == 0:
+        victoire = combat(j, BOSS['margit'])
+        if not victoire: return "stormveil_entree"
+        return "stormveil_interieur"
+    if c == 1:
+        cls()
+        lent("  Vous découvrez une brèche dans les remparts.\n"
+             "  Mais un Chevalier Rouge monte la garde.")
+        lent("  Il vous aperçoit !")
+        victoire = combat(j, BOSS['chevalier_rouge'])
+        if not victoire: return "stormveil_entree"
+        lent("\n  Vous passez sans affronter Margit.\n"
+             "  Vous gardez l'avantage de la surprise à l'intérieur.")
+        j['objets_cles'].append("Passage Secret")
+        return "stormveil_interieur"
+    if c == 2:
+        if j['runes'] >= 200:
+            j['runes'] -= 200
+            lent("\n  La sentinelle accepte les Runes et vous ouvre une poterne.\n"
+                 "  Vous pénétrez dans Stormveil sans combat.")
+            return "stormveil_interieur"
+        else:
+            lent("\n  Vous n'avez pas assez de Runes. La sentinelle rigole.")
+            pause(1)
+            return "stormveil_entree"
+    # c == 3
+    lent("\n  Vous retournez vous entraîner dans les plaines.")
+    # mini-donjon rapide
+    victoire = combat(j, BOSS['loup_gris'])
+    if victoire: xp_up(j, 20, 100)
+    return "stormveil_entree"
+
+def n_stormveil_interieur(j):
+    cls(); titre("🏰  STORMVEIL — Corridors Maudits")
+    lent("  L'intérieur du château gronde. Des soldats greffés patrouillent.\n"
+         "  Deux routes mènent au trône de Godrick.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Passer par les cuisines (plus de monstres, trésor potentiel)",
+        "Passer par les souterrains (plus rapide, plus sombre)",
+        "Examiner la Tour Noire au centre du château",
+        "Affronter directement Godrick",
+    ])
+    if c == 0:
+        cls()
+        lent("  Les cuisines puent la chair brûlée. Des cuisiniers mutants vous attaquent.\n"
+             "  Après les avoir repoussés, vous trouvez un coffre avec 300 Runes et une potion.")
+        j['runes'] += 300
+        ajouter_item(j, "Potion de Vigueur")
+        xp_up(j, 25, 0)
+        return "godrick_boss"
+    if c == 1:
+        cls()
+        lent("  Les souterrains sont silencieux… trop silencieux.\n"
+             "  Un spectre surgit de l'obscurité.")
+        victoire = combat(j, BOSS['spectre_arene'])
+        if not victoire: return "stormveil_interieur"
+        lent("\n  Vous débouchez directement sous la salle du trône.")
+        xp_up(j, 20, 50)
+        return "godrick_boss"
+    if c == 2:
+        cls()
+        lent("  La Tour Noire abrite un secret : une lettre scellée\n"
+             "  révèle que Godrick a conclu un pacte avec une entité des ombres.\n"
+             "  Vous pouvez utiliser cette information…")
+        j['objets_cles'].append("Lettre de Pacte")
+        ajouter_item(j, "Lettre de Pacte Sombre")
+        pause(1)
+        if combat(j, BOSS['garde_tour']):
+            xp_up(j, 30, 100)
+        return "stormveil_interieur"
+    # c == 3
+    return "godrick_boss"
+
+def n_godrick_boss(j):
+    cls(); titre("👑  GODRICK LE GREFFÉ")
+    lent("  Godrick se dresse sur son trône de membres volés.\n"
+         "  « Un autre Sans-Éclat ? Parfait. J'ai besoin de nouvelles greffes ! »")
+    pause(1)
+
+    # Si le joueur a la Lettre de Pacte, option spéciale
+    if "Lettre de Pacte" in j['objets_cles']:
+        statut(j)
+        print("  Vous tenez la Lettre de Pacte en évidence. Godrick tressaille.")
+        c = choix([
+            "Affronter Godrick normalement",
+            "Menacer de révéler son pacte (le déstabiliser)",
+        ])
+        if c == 1:
+            lent("\n  Godrick panique. Son attaque est réduite de 20% ce combat !")
+            BOSS['godrick']['atk'] = int(BOSS['godrick']['atk'] * 0.8)
+    else:
+        statut(j)
+        c2 = choix(["Charger au combat", "Tenter de parlementer (échoue probablement)"])
+        if c2 == 1:
+            lent("\n  Godrick éclate de rire et vous attaque. Combat normal.")
+
+    victoire = combat(j, BOSS['godrick'])
+    if not victoire:
+        lent("  Vous vous relevez dans la cour de Stormveil.")
+        return "godrick_boss"
+
+    cls(); titre("STORMVEIL CONQUIS")
+    lent("  Le château est à vous. Trois chemins s'ouvrent depuis Stormveil.")
+    return "carrefour_post_godrick"
+
+def n_carrefour_post_godrick(j):
+    cls(); titre("🗺  CARREFOUR DES DESTINS")
+    lent("  Trois régions vous appellent. Chacune cache un Fragment de l'Anneau Brisé.")
+    pause(1)
+    statut(j)
+    frags = [o for o in j['objets_cles'] if 'Fragment' in o]
+    print(f"  Fragments collectés : {len(frags)}/6\n")
+    c = choix([
+        "Académie Raya Lucaria  →  Rennala (magie lunaire)",
+        "Caelid, terres maudites →  Radahn (guerre et étoiles)",
+        "Profondeurs de Mohgwyn →  Mohg (sang et folie)",
+        "Chemin vers Miquella   →  Malénia (la plus dangereuse)",
+        "Retourner à Stormveil chercher des objets",
+    ])
+    if c == 0: return "raya_lucaria_entree"
+    if c == 1: return "caelid_entree"
+    if c == 2: return "mohgwyn_entree"
+    if c == 3: return "haligtree_entree"
+    # c == 4
+    lent("\n  Vous retournez fouiller Stormveil. Vous trouvez 200 Runes et une flasque.")
+    j['runes'] += 200
+    ajouter_item(j, "Flasque de Larmes")
+    return "carrefour_post_godrick"
+
+# ────────────────────────────────────────────────────────
+#  BRANCHE B — CHEMIN DE L'OMBRE (sud) depuis prologue
+# ────────────────────────────────────────────────────────
+
+def n_ruines_ombre(j):
+    cls(); titre("🌑  RUINES DU SUD — L'Ombre Ancestrale")
+    lent("  Les ruines exhalent une magie ancienne, interdite.\n"
+         "  Un cultiste masqué vous accueille :\n"
+         "  « Tu portes la grâce... mais il existe un autre chemin. »")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Écouter le cultiste avec méfiance",
+        "Attaquer le cultiste immédiatement",
+        "L'ignorer et explorer les ruines",
+    ])
+    if c == 0:
+        cls()
+        lent("  Le cultiste vous parle du Dieu Sombre Sans Nom,\n"
+             "  emprisonné avant l'Erdtree. Il offre une puissance\n"
+             "  que Marika vous a volée.\n"
+             "  « Rejoignez l'Alliance de l'Ombre. »")
+        c2 = choix(["Accepter le Serment de l'Ombre", "Refuser mais continuer d'écouter"])
+        if c2 == 0:
+            j['alliance_ombre'] = True
+            ajouter_item(j, "Marque de l'Ombre")
+            lent("\n  Une marque noire s'inscrit sur votre main.\n"
+                 "  Votre attaque augmente de 5. Vous pouvez accéder aux passages secrets des ombres.")
+            j['attaque'] += 5
+            return "ruines_exploration"
+        lent("\n  Vous refusez. Le cultiste hoche la tête.\n  « Le moment venu, vous comprendrez. »")
+        return "ruines_exploration"
+    if c == 1:
+        lent("\n  Le cultiste esquive avec une agilité surprenante et disparaît.\n"
+             "  Vous perdez une opportunité, mais restez pur.")
+        return "ruines_exploration"
+    # c == 2
+    lent("\n  Vous ignorez le cultiste et explorez. Dans un coffre :\n"
+         "  un Talisman de la Bête Ancienne et 100 Runes.")
+    j['runes'] += 100
+    ajouter_item(j, "Talisman de la Bête Ancienne (+10% ATK)")
+    j['attaque'] += 3
+    return "ruines_exploration"
+
+def n_ruines_exploration(j):
+    cls(); titre("🌑  RUINES — Profondeurs")
+    lent("  Les ruines s'enfoncent dans la terre. Des passages mènent\n"
+         "  vers une arène souterraine et vers un autel oublié.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Descendre dans l'Arène Oubliée",
+        "Examiner l'Autel du Dieu Sombre",
+        "Remonter vers Limgrave et reprendre le chemin normal",
+        "Explorer les catacombes adjacentes",
+    ])
+    if c == 0:
+        cls(); lent("  L'arène… quelqu'un vous attend.")
+        victoire = combat(j, BOSS['spectre_arene'])
+        if not victoire: return "ruines_exploration"
+        xp_up(j, 40, 150)
+        lent("\n  Une porte s'ouvre au fond de l'arène.\n"
+             "  Vous débouchez sur une route menant directement à Leyndell.")
+        j['objets_cles'].append("Laissez-passer de l'Ombre")
+        return "carrefour_post_godrick"   # bypass Godrick via ombre
+    if c == 1:
+        cls()
+        lent("  L'autel vibre d'une énergie ancienne.\n"
+             "  Des runes inconnues s'illuminent sous vos pieds.")
+        if j.get('alliance_ombre'):
+            lent("  La Marque réagit ! L'autel vous accorde\n"
+                 "  une vision : la localisation du Dieu Sombre.")
+            j['objets_cles'].append("Vision du Dieu Sombre")
+            xp_up(j, 50, 0)
+        else:
+            lent("  Sans la Marque, l'autel reste muet.\n"
+                 "  Mais vous absorbez un peu d'énergie ambiante.")
+            xp_up(j, 20, 0)
+        return "ruines_exploration"
+    if c == 2:
+        lent("\n  Vous remontez vers Limgrave. Mélina vous observe, silencieuse.")
+        return "limgrave_grace"
+    # c == 3
+    cls(); lent("  Les catacombes abritent un boss endormi…")
+    victoire = combat(j, BOSS['loup_gris'])
+    if victoire:
+        xp_up(j, 35, 120)
+        ajouter_item(j, "Sceau des Catacombes")
+    return "ruines_exploration"
+
+# ────────────────────────────────────────────────────────
+#  ZONES PRINCIPALES (après Godrick ou via ombre)
+# ────────────────────────────────────────────────────────
+
+def n_raya_lucaria_entree(j):
+    cls(); titre("🌙  RAYA LUCARIA — Aux Portes")
+    lent("  L'académie flotte sur un lac gelé. Son entrée est scellée\n"
+         "  par un sort de la Reine Rennala. Une clé d'académie est nécessaire.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Chercher la clé dans les villages environnants",
+        "Forcer le passage magique (risqué si non-mage)",
+        "Infiltrer par les catacombes sous le lac",
+        "Revenir au carrefour",
+    ])
+    if c == 0:
+        cls()
+        lent("  Dans un village de mages dissidents, vous trouvez la clé\n"
+             "  contre un service : éliminer un sorcier renégat.")
+        victoire = combat(j, BOSS['sorcier_noir'])
+        if not victoire: return "raya_lucaria_entree"
+        ajouter_item(j, "Clé de l'Académie")
+        j['objets_cles'].append("Clé Académie")
+        return "raya_lucaria_interieur"
+    if c == 1:
+        cls()
+        if j['classe'] == 'Astrologue' or j.get('foi_erdtree'):
+            lent("  Votre magie résonne avec le sort. La porte s'ouvre !")
+            return "raya_lucaria_interieur"
+        else:
+            lent("  La barrière vous repousse violemment ! -40 PV.")
+            j['pv'] = max(1, j['pv'] - 40)
+            return "raya_lucaria_entree"
+    if c == 2:
+        cls(); lent("  Les catacombes sont gardées par le fantôme de Godfrey.")
+        victoire = combat(j, BOSS['godfrey_fantome'])
+        if not victoire: return "raya_lucaria_entree"
+        lent("\n  Un passage secret vous mène directement\n"
+             "  dans la bibliothèque de Rennala.")
+        return "rennala_boss"
+    return "carrefour_post_godrick"
+
+def n_raya_lucaria_interieur(j):
+    cls(); titre("🌙  RAYA LUCARIA — Couloirs de Cristal")
+    lent("  Des sorciers en robe vous épient derrière les colonnes.\n"
+         "  Deux chemins : la Grande Bibliothèque ou la Salle des Miroirs.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Grande Bibliothèque → directement vers Rennala",
+        "Salle des Miroirs → puzzles et trésors",
+        "Chercher des alliés parmi les étudiants rebelles",
+        "Voler les recherches secrètes dans les laboratoires",
+    ])
+    if c == 0: return "rennala_boss"
+    if c == 1:
+        cls()
+        lent("  La Salle des Miroirs projette vos peurs.\n"
+             "  Vous devez affronter un double de vous-même !")
+        # Combat contre soi-même
+        double = dict(
+            nom="Votre Double Sombre",
+            description="Il connaît chacun de vos mouvements.",
+            pv=j['pv_max']//2, atk=j['attaque']-2, def_=j['defense']//2,
+            **{k: v for k,v in BOSS['chevalier_rouge'].items()
+               if k not in ('nom','description','pv','atk','def_')},
+        )
+        double['def'] = double['def_']
+        victoire = combat(j, double)
+        if victoire:
+            lent("\n  En vous vainquant vous-même, vous gagnez en lucidité.\n"
+                 "  +15 ATK permanent !")
+            j['attaque'] += 15  # gros bonus
+            xp_up(j, 60, 200)
+        return "rennala_boss"
+    if c == 2:
+        cls()
+        lent("  Des étudiants rebelles, dégoûtés de Rennala, vous rejoignent.\n"
+             "  Ils réduisent l'ATK de Rennala de 15% au prochain combat.")
+        BOSS['rennala']['atk'] = int(BOSS['rennala']['atk'] * 0.85)
+        j['objets_cles'].append("Alliance Étudiants")
+        return "rennala_boss"
+    # c == 3
+    cls()
+    lent("  Dans un labo caché, vous trouvez la formule d'un sort interdit.\n"
+         "  Un garde vous surprend !")
+    if combat(j, BOSS['spectre_arene']):
+        ajouter_item(j, "Sort Interdit de la Pleine Lune")
+        j['attaque'] += 6
+        xp_up(j, 40, 150)
+    return "rennala_boss"
+
+def n_rennala_boss(j):
+    cls(); titre("🌙  RENNALA, REINE DE LA PLEINE LUNE")
+    lent("  Rennala flotte au centre de la bibliothèque, entourée\n"
+         "  de ses enfants-poupées. Elle pleure, berçant un œuf d'or.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Briser les poupées pour atteindre Rennala (phase 1 + 2)",
+        "Parler à Rennala avant le combat",
+        "Utiliser le Sort Interdit si vous l'avez",
+    ])
+    if c == 1:
+        cls()
+        lent("  Rennala baisse sa garde, émue. Elle parle de Miquella, son fils.\n"
+             "  Vous gagnez +10% de résistance pendant ce combat.")
+        j['defense'] += 3
+    if c == 2 and "Sort Interdit de la Pleine Lune" in j['inventaire']:
+        cls()
+        lent("  Vous lancez le sort ! Rennala est déstabilisée dès le début.\n"
+             "  Ses PV sont réduits de 20%.")
+        BOSS['rennala']['pv'] = int(BOSS['rennala']['pv'] * 0.8)
+
+    victoire = combat(j, BOSS['rennala'])
+    if not victoire:
+        lent("  Vous vous relevez à l'entrée de l'académie.")
+        return "rennala_boss"
+
+    cls(); titre("RENNALA VAINCUE")
+    lent("  Rennala s'effondre en larmes. Elle chuchote : « Miquella… »\n")
+    c2 = choix([
+        "La laisser en paix et partir avec la Grande Rune",
+        "Lui demander où se trouve Miquella",
+        "Lui prendre son œuf d'or (objet mystérieux)",
+    ])
+    if c2 == 0:
+        lent("  Vous partez, respectueux. Un geste qui aura peut-être des conséquences.")
+    if c2 == 1:
+        lent("  « Il est au Haligtree… mais il est en danger. »\n"
+             "  Vous notez l'information précieuse.")
+        j['objets_cles'].append("Localisation de Miquella")
+    if c2 == 2:
+        lent("  L'œuf d'or pulse dans vos mains. Puissance immense… et malédiction ?")
+        ajouter_item(j, "Œuf d'Or de Rennala")
+        j['attaque'] += 8
+        j['pv_max'] = max(1, j['pv_max'] - 30)  # malédiction légère
+    return "carrefour_milieu"
+
+def n_caelid_entree(j):
+    cls(); titre("🩸  CAELID — Terres Maudites")
+    lent("  Le ciel est rouge sang. La Flétrissure Scarlatine\n"
+         "  consume tout sur son passage. Des créatures agonisantes rôdent.\n"
+         "  Un fermier désespéré vous interpelle.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Écouter le fermier",
+        "Filer vers le champ de bataille de Radahn",
+        "Explorer le Fort Faroth au nord-est",
+        "Revenir au carrefour",
+    ])
+    if c == 0:
+        cls()
+        lent("  Le fermier : « Ma fille a été capturée par les soldats de Radahn.\n"
+             "  Je vous en supplie, sauvez-la ! »")
+        c2 = choix(["Accepter la mission", "Refuser et continuer"])
+        if c2 == 0:
+            j['objets_cles'].append("Mission : Fille du Fermier")
+            lent("\n  Vous promettez de retrouver la fille.\n"
+                 "  +30 XP pour votre altruisme.")
+            xp_up(j, 30, 0)
+        return "caelid_champ"
+    if c == 1: return "caelid_champ"
+    if c == 2:
+        cls(); lent("  Fort Faroth abrite des dragons endormis et un trésor colossal.")
+        if combat(j, BOSS['loup_gris']):  # symbole du garde du fort
+            lent("\n  Vous trouvez le Sang du Dragon !")
+            j['sang_dragon'] = True
+            ajouter_item(j, "Sang du Dragon")
+            j['attaque'] += 7
+            xp_up(j, 50, 200)
+        return "caelid_entree"
+    return "carrefour_post_godrick"
+
+def n_caelid_champ(j):
+    cls(); titre("🩸  FESTIVAL DE RADAHN")
+    lent("  Le Festival de Radahn est un suicide collectif glorieux.\n"
+         "  Des héros du monde entier sont convoqués pour l'affronter.\n"
+         "  Radahn, à moitié fou, dévore ses propres soldats.")
+    pause(1)
+    statut(j)
+
+    if "Mission : Fille du Fermier" in j['objets_cles']:
+        print("  (Vous apercevez une cellule à l'est — peut-être la fille du fermier ?)")
+
+    c = choix([
+        "Rejoindre le Festival et combattre Radahn",
+        "Libérer la fille du fermier d'abord (si mission active)",
+        "S'allier à un autre héros du Festival",
+        "Observer le champ de bataille avant d'agir",
+    ])
+    if c == 0: return "radahn_boss"
+    if c == 1:
+        if "Mission : Fille du Fermier" in j['objets_cles']:
+            cls()
+            lent("  Vous brisez les barreaux. La jeune femme s'enfuit saine et sauve.\n"
+                 "  Une récompense vous attend après le combat.")
+            j['objets_cles'].append("Fille Sauvée")
+            xp_up(j, 40, 0)
+        else:
+            lent("  Vous n'avez pas cette mission active.")
+        return "caelid_champ"
+    if c == 2:
+        cls()
+        lent("  Le héros Blaidd, un loup-garou, vous propose une alliance.\n"
+             "  Ensemble, vous distrayez Radahn — son ATK est réduite de 10%.")
+        BOSS['radahn']['atk'] = int(BOSS['radahn']['atk'] * 0.9)
+        j['objets_cles'].append("Alliance Blaidd")
+        ajouter_item(j, "Épée du Loup-Garou Blaidd")
+        j['serment_loup'] = True
+        return "radahn_boss"
+    # c == 3
+    cls()
+    lent("  Vous observez : Radahn attaque en deux phases.\n"
+         "  Phase 2 : il s'écrase depuis l'orbite comme une météorite.\n"
+         "  Vous apprenez son pattern. Votre esquive sera +20% ce combat.")
+    j['objets_cles'].append("Tactique Radahn")
+    return "radahn_boss"
+
+def n_radahn_boss(j):
+    cls(); titre("⭐  STARSCOURGE RADAHN")
+    lent("  Radahn surgit à l'horizon, chevauchant son minuscule cheval.\n"
+         "  Deux épées colossales dans chaque main. Le sol tremble.")
+    pause(1)
+    if "Tactique Radahn" in j['objets_cles']:
+        BOSS['radahn']['def'] = int(BOSS['radahn']['def'] * 0.85)
+        lent("  (Votre analyse tactique vous donne l'avantage.)")
+
+    victoire = combat(j, BOSS['radahn'])
+    if not victoire:
+        lent("  Vous vous relevez au camp du Festival.")
+        return "radahn_boss"
+
+    cls(); titre("RADAHN VAINCU — LES ÉTOILES TOMBENT")
+    lent("  En vainquant Radahn, vous libérez les étoiles qu'il retenait.\n"
+         "  Une étoile filante révèle un nouveau passage…")
+
+    if "Fille Sauvée" in j['objets_cles']:
+        lent("  Le fermier vous remercie avec des larmes de joie.\n"
+             "  Il vous offre la Lance Ancestrale de sa famille.")
+        ajouter_item(j, "Lance Ancestrale (ATK +12)")
+        j['attaque'] += 12
+
+    c = choix([
+        "Suivre l'étoile vers Nokron (cité céleste cachée)",
+        "Continuer vers Leyndell via la route principale",
+    ])
+    if c == 0:
+        j['objets_cles'].append("Chemin vers Nokron")
+        return "nokron"
+    return "carrefour_milieu"
+
+def n_nokron(j):
+    cls(); titre("✨  NOKRON — Cité Éternelle")
+    lent("  Une cité de pierre noire et d'étoiles figées.\n"
+         "  Elle était cachée sous la Terre Entre depuis des éons.\n"
+         "  Au centre : un autel qui vibre de la même énergie\n"
+         "  que la Marque de l'Ombre…")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Explorer les rues de Nokron",
+        "Approcher de l'Autel Central",
+        "Descendre vers les Profondeurs de la Cité",
+    ])
+    if c == 0:
+        cls(); lent("  Vous trouvez une armure légendaire et 400 Runes.")
+        j['runes'] += 400
+        ajouter_item(j, "Armure de Nokron (+5 DEF)")
+        j['defense'] += 5
+        xp_up(j, 50, 0)
+        return "nokron"
+    if c == 1:
+        cls()
+        if j.get('alliance_ombre'):
+            lent("  La Marque réagit à l'autel. Une voix grave résonne :\n"
+                 "  « Tu es proche. Le Dieu Sombre t'attend à Leyndell. »\n"
+                 "  Vous débloquez le chemin vers le boss final alternatif.")
+            j['objets_cles'].append("Chemin vers le Dieu Sombre")
+        else:
+            lent("  L'autel est muet pour vous. Il faut la Marque de l'Ombre.")
+            xp_up(j, 20, 0)
+        return "nokron"
+    # c == 2
+    cls()
+    lent("  Dans les profondeurs, un fragment de l'Anneau Brisé flotte\n"
+         "  dans l'air comme une étoile capturée.")
+    j['objets_cles'].append("Fragment Nokron")
+    lent("  Le Fragment de Nokron est entre vos mains !")
+    xp_up(j, 70, 300)
+    return "carrefour_milieu"
+
+def n_mohgwyn_entree(j):
+    cls(); titre("🩸  MOHGWYN — Palais du Sang")
+    lent("  Un portail de sang vous propulse dans le palais souterrain de Mohg.\n"
+         "  Des pèlerins se vident de leur sang pour un rituel mystérieux.\n"
+         "  Mohg veut ressusciter Miquella comme son consort divin.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Infiltrer le palais par les égouts",
+        "Se déguiser en pèlerin pour approcher Mohg",
+        "Attaquer frontalement",
+        "Revenir au carrefour",
+    ])
+    if c == 0:
+        cls(); lent("  Les égouts sont immondes mais vides. Vous arrivez sous le trône.")
+        xp_up(j, 30, 100)
+        return "mohg_boss"
+    if c == 1:
+        cls()
+        lent("  Déguisé, vous observez le rituel. Mohg ignore que\n"
+             "  Miquella ne veut pas être son consort.\n"
+             "  Vous gagnez une information cruciale sur sa faiblesse.")
+        BOSS['mohg']['def'] = max(1, BOSS['mohg']['def'] - 4)
+        j['objets_cles'].append("Faiblesse de Mohg")
+        return "mohg_boss"
+    if c == 2: return "mohg_boss"
+    return "carrefour_post_godrick"
+
+def n_mohg_boss(j):
+    cls(); titre("🩸  MOHG, SEIGNEUR DU SANG")
+    lent("  Mohg surgit sur son trône de chair. Il soulève une lance de sang.\n"
+         "  « Que le sang du Sans-Éclat consacre ce rituel ! »")
+    pause(1)
+    victoire = combat(j, BOSS['mohg'])
+    if not victoire:
+        lent("  Vous fuyez dans les égouts du palais.")
+        return "mohg_boss"
+    cls(); titre("MOHG VAINCU")
+    lent("  Miquella, mi-endormi, mi-réveillé, est libre.\n"
+         "  Il murmure : « Merci… mais je dois finir ce que j'ai commencé. »")
+    c = choix([
+        "Laisser Miquella partir",
+        "Demander à Miquella de vous aider contre les demi-dieux restants",
+    ])
+    if c == 1:
+        lent("  Miquella hoche la tête. Son aide affaiblit les prochains boss.")
+        j['objets_cles'].append("Bénédiction de Miquella")
+        BOSS['maliketh']['atk'] = int(BOSS['maliketh']['atk'] * 0.85)
+    return "carrefour_milieu"
+
+def n_haligtree_entree(j):
+    cls(); titre("🌸  HALIGTREE — L'Arbre Secret")
+    lent("  Un arbre argenté caché à la fin du monde. Construit par Miquella\n"
+         "  pour guérir la malédiction de sa sœur Malénia.\n"
+         "  La route est semée d'embûches létales.")
+    pause(1)
+    statut(j)
+    print("  ⚠  AVERTISSEMENT : Malénia est le boss le plus difficile du jeu.")
+    c = choix([
+        "Affronter Malénia malgré tout",
+        "Explorer le village elfique d'abord (objets)",
+        "Trouver le tombeau de Miquella d'abord",
+        "Revenir au carrefour, trop dangereux pour l'instant",
+    ])
+    if c == 0: return "malenia_boss"
+    if c == 1:
+        cls(); lent("  Le village abrite des elfes guérisseurs. Ils vous soignent\n"
+                    "  et vous donnent une potion unique.")
+        j['pv'] = j['pv_max']
+        j['stamina'] = j['stamina_max']
+        ajouter_item(j, "Potion des Elfes (PV Max +20)")
+        j['pv_max'] += 20
+        xp_up(j, 40, 0)
+        return "haligtree_entree"
+    if c == 2:
+        cls(); lent("  Le tombeau de Miquella révèle qu'il a choisi de souffrir\n"
+                    "  pour donner une chance aux mordicants et aux maudits.\n"
+                    "  Cette révélation vous remplit d'une foi nouvelle.")
+        j['foi_erdtree'] = True
+        j['defense'] += 4
+        xp_up(j, 50, 0)
+        return "malenia_boss"
+    return "carrefour_post_godrick"
+
+def n_malenia_boss(j):
+    cls(); titre("🌸  MALÉNIA, LAME DE MIQUELLA")
+    lent("  Malénia ôte son bras prothétique.\n"
+         "  « Je suis Malénia, Lame de Miquella.\n"
+         "    Et je n'ai jamais connu la défaite. »\n"
+         "  Phase 2 : elle se transforme en déesse de la Flétrissure.")
+    pause(1)
+    statut(j)
+    print("  ⚠  Malénia se soigne de chaque coup qu'elle porte !")
+
+    if "Bénédiction de Miquella" in j['objets_cles']:
+        lent("  La bénédiction de Miquella neutralise partiellement sa guérison !")
+        BOSS['malenia']['atk'] = int(BOSS['malenia']['atk'] * 0.8)
+
+    victoire = combat(j, BOSS['malenia'])
+    if not victoire:
+        lent("  Malénia est sans pitié. Vous vous relevez à l'entrée de l'Haligtree.")
+        return "malenia_boss"
+
+    cls(); titre("🌸  MALÉNIA VAINCUE")
+    lent("  Malénia s'effondre en pétales d'or.\n"
+         "  Elle murmure : « Miquella… je t'ai retrouvé. »\n"
+         "  Une fleur d'une beauté absolue naît de ses cendres.")
+    ajouter_item(j, "Fleur Éternelle de Malénia")
+    return "carrefour_milieu"
+
+# ────────────────────────────────────────────────────────
+#  CARREFOUR MILIEU (vers Leyndell)
+# ────────────────────────────────────────────────────────
+
+def n_carrefour_milieu(j):
+    cls(); titre("🗺  ROUTE VERS LEYNDELL")
+    frags = [o for o in j['objets_cles'] if 'Fragment' in o]
+    lent(f"  Fragments de l'Anneau Brisé : {len(frags)}/4 requis\n")
+    statut(j)
+
+    if len(frags) < 2:
+        lent("  Vous devez encore vaincre des demi-dieux.\n"
+             "  La route vers Leyndell est fermée pour l'instant.")
+        c = choix([
+            "Retourner au Carrefour des Destins (après Godrick)",
+            "Explorer librement",
+        ])
+        return "carrefour_post_godrick"
+
+    lent("  La route vers Leyndell est ouverte. Cependant…\n"
+         "  Mélina vous observe avec inquiétude.")
+    c = choix([
+        "Foncer vers Leyndell, Capitale Royale",
+        "Parler à Mélina avant de partir",
+        "Explorer encore les zones précédentes",
+    ])
+    if c == 0: return "leyndell_entree"
+    if c == 1:
+        cls()
+        lent("  Mélina : « Il existe quelque chose que vous devez savoir.\n"
+             "  Pour accéder à l'Arbre Éternel, quelqu'un doit brûler.\n"
+             "  Je m'offre comme combustible. Mais… êtes-vous prêt à ça ? »")
+        c2 = choix([
+            "Accepter le sacrifice de Mélina",
+            "Refuser. Chercher une autre voie.",
+            "Demander s'il y a vraiment une autre option",
+        ])
+        if c2 == 0:
+            j['melina_vivante'] = False
+            lent("\n  Mélina hoche la tête. « Quand le moment viendra. »\n"
+                 "  Une tristesse s'installe entre vous deux.")
+        if c2 == 1:
+            lent("\n  « Cherchez le Donjon de l'Aube. Il cache peut-être une réponse. »")
+            j['objets_cles'].append("Quête : Donjon de l'Aube")
+        if c2 == 2:
+            lent("\n  « Si vous avez la Marque de l'Ombre… il existe un autre combustible. »")
+            if j.get('alliance_ombre'):
+                lent("  La Marque réagit. Vous pourrez brûler le Dieu Sombre à la place !")
+                j['objets_cles'].append("Combustible Alternatif")
+        return "leyndell_entree"
+    # c == 2
+    return "carrefour_post_godrick"
+
+# ────────────────────────────────────────────────────────
+#  LEYNDELL
+# ────────────────────────────────────────────────────────
+
+def n_leyndell_entree(j):
+    cls(); titre("👑  LEYNDELL, CAPITALE ROYALE")
+    lent("  La cité dorée est déserte. Des chevaliers fantômes patrouillent\n"
+         "  sous un arbre géant dont les branches percent les nuages.\n"
+         "  La Tour du Trône se dresse au centre, gardée par Maliketh.")
+    pause(1)
+    statut(j)
+    c = choix([
+        "Avancer vers la Tour du Trône (combat Maliketh)",
+        "Explorer les ruelles pour trouver des alliés",
+        "Chercher les archives secrètes du Roi Godefroy",
+        "Descendre dans les catacombes royales",
+    ])
+    if c == 0: return "maliketh_boss"
+    if c == 1:
+        cls()
+        lent("  Dans une église en ruine, un chevalier survivant vous aide.\n"
+             "  Il vous donne une information sur la faiblesse de Maliketh.")
+        BOSS['maliketh']['atk'] = max(10, BOSS['maliketh']['atk'] - 5)
+        ajouter_item(j, "Renseignement sur Maliketh")
+        xp_up(j, 30, 150)
+        return "leyndell_entree"
+    if c == 2:
+        cls()
+        lent("  Les archives révèlent la vérité : Radagon et Marika\n"
+             "  sont une seule et même personne. Le combat final sera double.")
+        j['objets_cles'].append("Vérité de Radagon")
+        xp_up(j, 40, 0)
+        return "leyndell_entree"
+    # c == 3
+    cls()
+    if j.get('alliance_ombre') and "Chemin vers le Dieu Sombre" in j['objets_cles']:
+        lent("  Les catacombes cachent un sanctuaire du Dieu Sombre.\n"
+             "  Sa présence vous renforce massivement.")
+        j['attaque'] += 10
+        j['defense'] += 5
+        lent("  Le Dieu Sombre murmure : « Vaincs Maliketh. Ensuite, viens à moi. »")
+    else:
+        lent("  Vous trouvez 500 Runes dans les catacombes.")
+        j['runes'] += 500
+    xp_up(j, 50, 0)
+    return "leyndell_entree"
+
+def n_maliketh_boss(j):
+    cls(); titre("🌑  MALIKETH, LA LAME NOIRE")
+    lent("  Une bête monumentale surgit des ombres.\n"
+         "  Sa lame noire réduit votre barre de vie max à chaque touche.\n"
+         "  Phase 2 : il devient humanoïde et infiniment plus rapide.")
+    pause(1)
+
+    if j.get('melina_vivante') == False:
+        lent("  Mélina s'avance. « C'est ici que je fais mon choix. »\n"
+             "  Elle brûle, ouvrant un passage direct.\n"
+             "  Maliketh est affaibli par la flamme.")
+        BOSS['maliketh']['pv'] = int(BOSS['maliketh']['pv'] * 0.75)
+
+    if "Ombre de Mélina" in j.get('boss_tues', []) == False and j.get('traître'):
+        lent("  Le spectre de Mélina que vous avez trahie vous hante. -20 ATK ce combat.")
+        j['attaque'] = max(5, j['attaque'] - 20)
+
+    victoire = combat(j, BOSS['maliketh'])
+    if not victoire:
+        lent("  Vous vous relevez à l'entrée de Leyndell.")
+        return "maliketh_boss"
+
+    cls(); titre("MALIKETH VAINCU — L'ARBRE S'EMBRASE")
+    lent("  La mort de Maliketh propage la Destinia à tous les êtres.\n"
+         "  Leyndell se transforme en Cendres de Leyndell.\n"
+         "  La voie vers l'Arbre Éternel est ouverte.")
+    pause(2)
+    return "choix_fin"
+
+# ────────────────────────────────────────────────────────
+#  CHOIX DE FIN
+# ────────────────────────────────────────────────────────
+
+def n_choix_fin(j):
+    cls(); titre("⚡  AUX PORTES DE L'ARBRE ÉTERNEL")
+    lent("  Vous êtes au sommet. Les marches de l'Arbre Éternel\n"
+         "  montent vers une lumière aveuglante.\n"
+         "  Plusieurs voix vous parlent simultanément.\n")
+    pause(1)
+    statut(j)
+
+    # Options disponibles selon les flags
+    options = ["Monter et affronter Radagon + La Bête Dorée (Fin Elden Lord)"]
+
+    if j.get('alliance_ombre') and "Chemin vers le Dieu Sombre" in j['objets_cles']:
+        options.append("Invoquer le Dieu Sombre — Fin de l'Ombre Absolue")
+
+    if j.get('serment_loup') and "Alliance Blaidd" in j['objets_cles']:
+        options.append("Invoquer Blaidd et les loups — Fin du Serment du Loup")
+
+    if "Œuf d'Or de Rennala" in j['inventaire']:
+        options.append("Utiliser l'Œuf d'Or pour renaître — Fin de la Renaissance")
+
+    if len([o for o in j['objets_cles'] if 'Fragment' in o]) >= 4:
+        options.append("Détruire l'Anneau Brisé pour toujours — Fin de l'Âge Sombre")
+
+    options.append("Refuser l'Elden Lordship — Fin de l'Errant")
+
+    c = choix(options)
+    j['fin_choisie'] = options[c]
+    return "boss_final_" + str(c)
+
+# ────────────────────────────────────────────────────────
+#  BOSS FINAUX & FINS
+# ────────────────────────────────────────────────────────
+
+def n_boss_final_0(j):
+    """Fin Elden Lord — Radagon + Bête Dorée"""
+    cls(); titre("⚡  RADAGON DE L'ÉTOILE D'OR")
+    lent("  Radagon surgit — le consort de Marika, son autre moitié.\n"
+         "  Son marteau frappe aussi vite que la foudre.")
+    if "Vérité de Radagon" in j['objets_cles']:
+        lent("  Vous connaissez sa vérité : il est Marika. Cela vous donne\n"
+             "  un avantage psychologique. Sa DEF est réduite.")
+        BOSS['radagon']['def'] = max(5, BOSS['radagon']['def'] - 5)
+
+    victoire = combat(j, BOSS['radagon'], fuir_possible=False)
+    if not victoire:
+        lent("  Vous vous relevez au pied de l'Arbre.")
+        return "boss_final_0"
+
+    cls(); titre("⚡  LA BÊTE DORÉE")
+    lent("  Le corps de Radagon explose. Une entité cosmique émerge.\n"
+         "  La Bête Dorée — l'Anneau Brisé lui-même, incarné.")
+    pause(1.5)
+    victoire2 = combat(j, BOSS['elden_beast'], fuir_possible=False)
+    if not victoire2:
+        lent("  La Bête vous consume. Vous vous relevez au pied de l'Arbre.")
+        return "boss_final_0"
+    return "fin_elden_lord"
+
+def n_boss_final_1(j):
+    """Fin Ombre Absolue"""
+    cls(); titre("🌑  LE DIEU SOMBRE SANS NOM")
+    lent("  Il émerge des profondeurs de la réalité.\n"
+         "  Une entité antérieure à l'Erdtree, à Marika, à tout.\n"
+         "  « Tu as choisi la vérité absolue. Affronte-moi. »")
+    pause(1.5)
+    victoire = combat(j, BOSS['dieu_sombre'], fuir_possible=False)
+    if not victoire:
+        lent("  Le Dieu Sombre vous repousse. Reprenez des forces.")
+        return "boss_final_1"
+    return "fin_ombre"
+
+def n_boss_final_2(j):
+    """Fin Serment du Loup"""
+    cls(); titre("🐺  SERMENT DU LOUP — COMBAT COLLECTIF")
+    lent("  Blaidd et ses loups se battent à vos côtés.\n"
+         "  Ensemble, vous affrontez Radagon — avec 20% ATK en plus.")
+    j['attaque'] = int(j['attaque'] * 1.2)
+    victoire = combat(j, BOSS['radagon'], fuir_possible=False)
+    if not victoire: return "boss_final_2"
+    victoire2 = combat(j, BOSS['elden_beast'], fuir_possible=False)
+    if not victoire2: return "boss_final_2"
+    return "fin_loup"
+
+def n_boss_final_3(j):
+    """Fin Renaissance"""
+    cls(); titre("🥚  L'ŒUF D'OR — RENAISSANCE")
+    lent("  Vous brisez l'Œuf d'Or de Rennala sur les marches de l'Arbre.\n"
+         "  Une énergie lunaire massive explose, dissolvant Radagon\n"
+         "  et la Bête Dorée avant même le combat.\n"
+         "  Mais le prix est élevé — vous perdez tous vos souvenirs.")
+    pause(2)
+    return "fin_renaissance"
+
+def n_boss_final_4(j):
+    """Fin Âge Sombre — Détruire l'Anneau"""
+    cls(); titre("💀  DESTRUCTION DE L'ANNEAU BRISÉ")
+    lent("  Vous rassemblez les 4+ Fragments et les tendez vers l'Arbre.\n"
+         "  Radagon surgit furieux — il ne peut laisser l'Anneau être détruit.")
+    victoire = combat(j, BOSS['radagon'], fuir_possible=False)
+    if not victoire: return "boss_final_4"
+    lent("\n  Vous brisez l'Anneau en milliards d'éclats.\n"
+         "  L'Arbre Éternel s'éteint lentement. Un Âge Sombre commence.")
+    return "fin_age_sombre"
+
+def n_boss_final_5(j):
+    """Fin de l'Errant"""
+    cls(); titre("🌍  FIN DE L'ERRANT")
+    lent("  Vous tournez le dos à l'Arbre Éternel.\n"
+         "  Pas d'Elden Lord. Pas de dieu. Juste la liberté.")
+    pause(2)
+    return "fin_errant"
+
+# ────────────────────────────────────────────────────────
+#  FINS NARRATIVES
+# ────────────────────────────────────────────────────────
+
+FINS = {
+    "fin_elden_lord": (
+        "👑  FIN ELDEN LORD — L'ÈRE DE LA GRÂCE",
+        lambda j: (
+            f"  {j['nom']} saisit les éclats de l'Anneau Brisé\n"
+            "  et, d'une volonté absolue, les ressoude.\n\n"
+            "  Une lumière dorée inonde la Terre Entre.\n"
+            "  L'ère des demi-dieux est révolue.\n\n"
+            "  Vous devenez l'Elden Lord.\n"
+            "  Un nouveau Grand Arbre pousse. Un nouvel âge commence.\n\n"
+            "  ✦  FIN CANONIQUE ATTEINTE  ✦"
+        )
+    ),
+    "fin_ombre": (
+        "🌑  FIN DE L'OMBRE ABSOLUE",
+        lambda j: (
+            f"  {j['nom']} absorbe le pouvoir du Dieu Sombre.\n\n"
+            "  L'Erdtree s'éteint. La Grâce disparaît.\n"
+            "  Une nouvelle réalité naît — sans dieux, sans lois.\n\n"
+            "  Vous êtes le premier être libre de la Terre Entre.\n"
+            "  Et le dernier.\n\n"
+            "  ✦  FIN SECRÈTE DE L'OMBRE  ✦"
+        )
+    ),
+    "fin_loup": (
+        "🐺  FIN DU SERMENT DU LOUP",
+        lambda j: (
+            f"  Blaidd, {j['nom']} et les loups règnent sur la Terre Entre.\n\n"
+            "  Pas de roi. Pas de dieu. Une meute.\n"
+            "  L'instinct remplace la loi dorée.\n\n"
+            "  La Terre Entre devient une forêt éternelle.\n\n"
+            "  ✦  FIN DU LOUP  ✦"
+        )
+    ),
+    "fin_renaissance": (
+        "🌙  FIN DE LA RENAISSANCE",
+        lambda j: (
+            f"  {j['nom']} renaît comme une créature lunaire nouvelle.\n\n"
+            "  Ni dieu ni mortel. Une entité de lumière froide.\n"
+            "  Rennala, depuis les décombres, sourit enfin.\n\n"
+            "  ✦  FIN LUNAIRE  ✦"
+        )
+    ),
+    "fin_age_sombre": (
+        "💀  FIN DE L'ÂGE SOMBRE",
+        lambda j: (
+            f"  {j['nom']} brise le dernier éclat de l'Anneau.\n\n"
+            "  Les dieux meurent. Les mortels sont enfin libres.\n"
+            "  Mais sans la Grâce, le monde s'enfonce dans l'obscurité.\n\n"
+            "  ✦  FIN DE L'AGE SOMBRE  ✦"
+        )
+    ),
+    "fin_errant": (
+        "🌍  FIN DE L'ERRANT",
+        lambda j: (
+            f"  {j['nom']} disparaît dans les terres sauvages de la Terre Entre.\n\n"
+            "  Libre. Sans couronne. Sans fardeau.\n"
+            "  L'Anneau Brisé reste brisé. Et peut-être que c'est bien ainsi.\n\n"
+            "  ✦  FIN DE L'ERRANT  ✦"
+        )
+    ),
+}
+
+def afficher_fin(j, cle_fin):
+    cls()
+    if cle_fin not in FINS:
+        cle_fin = "fin_elden_lord"
+    titre_fin, fn = FINS[cle_fin]
+    titre(titre_fin)
+    lent(fn(j))
+    pause(2)
+    print()
+    statut(j)
+    print(f"  Boss vaincus : {', '.join(j['boss_tues']) if j['boss_tues'] else 'aucun'}")
+    frags = [o for o in j['objets_cles'] if 'Fragment' in o]
+    print(f"  Fragments collectés : {len(frags)}")
+    print(f"  Runes finales : {j['runes']} 💰")
+    print()
+    input("  ✦  Appuyez sur Entrée pour quitter  ✦")
+
+# ═══════════════════════════════════════════════
+#  MACHINE À ÉTATS — ROUTEUR PRINCIPAL
+# ═══════════════════════════════════════════════
+
+NOEUDS = {
+    "prologue"                  : n_prologue,
+    "limgrave_grace"            : n_limgrave_grace,
+    "ruines_ombre"              : n_ruines_ombre,
+    "ruines_exploration"        : n_ruines_exploration,
+    "stormveil_entree"          : n_stormveil_entree,
+    "stormveil_interieur"       : n_stormveil_interieur,
+    "godrick_boss"              : n_godrick_boss,
+    "carrefour_post_godrick"    : n_carrefour_post_godrick,
+    "raya_lucaria_entree"       : n_raya_lucaria_entree,
+    "raya_lucaria_interieur"    : n_raya_lucaria_interieur,
+    "rennala_boss"              : n_rennala_boss,
+    "caelid_entree"             : n_caelid_entree,
+    "caelid_champ"              : n_caelid_champ,
+    "radahn_boss"               : n_radahn_boss,
+    "nokron"                    : n_nokron,
+    "mohgwyn_entree"            : n_mohgwyn_entree,
+    "mohg_boss"                 : n_mohg_boss,
+    "haligtree_entree"          : n_haligtree_entree,
+    "malenia_boss"              : n_malenia_boss,
+    "carrefour_milieu"          : n_carrefour_milieu,
+    "leyndell_entree"           : n_leyndell_entree,
+    "maliketh_boss"             : n_maliketh_boss,
+    "choix_fin"                 : n_choix_fin,
+    "boss_final_0"              : n_boss_final_0,
+    "boss_final_1"              : n_boss_final_1,
+    "boss_final_2"              : n_boss_final_2,
+    "boss_final_3"              : n_boss_final_3,
+    "boss_final_4"              : n_boss_final_4,
+    "boss_final_5"              : n_boss_final_5,
+}
+
+FINS_TERMINALES = set(FINS.keys())
+
+# ═══════════════════════════════════════════════
+#  ÉCRAN TITRE
+# ═══════════════════════════════════════════════
+
+def ecran_titre():
+    cls()
+    print("""
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║                                                                  ║
+  ║    ███████╗██╗     ██████╗ ███████╗███╗   ██╗    ██████╗        ║
+  ║    ██╔════╝██║     ██╔══██╗██╔════╝████╗  ██║    ██╔══██╗       ║
+  ║    █████╗  ██║     ██║  ██║█████╗  ██╔██╗ ██║    ██████╔╝       ║
+  ║    ██╔══╝  ██║     ██║  ██║██╔══╝  ██║╚██╗██║    ██╔══██╗       ║
+  ║    ███████╗███████╗██████╔╝███████╗██║ ╚████║    ██║  ██║       ║
+  ║    ╚══════╝╚══════╝╚═════╝ ╚══════╝╚═╝  ╚═══╝    ╚═╝  ╚═╝       ║
+  ║                                                                  ║
+  ║         I  N  G     v 2 . 0  ─  L ' A N N E A U  B R I S É      ║
+  ║                                                                  ║
+  ║    6 classes  ·  18 boss  ·  6 fins  ·  50+ chemins narratifs   ║
+  ║                                                                  ║
+  ╚══════════════════════════════════════════════════════════════════╝
+    """)
+    c = choix(["Nouvelle Partie", "Quitter"])
+    return c == 0
+
+# ═══════════════════════════════════════════════
+#  BOUCLE PRINCIPALE
+# ═══════════════════════════════════════════════
+
+def main():
+    if not ecran_titre():
+        print("\n  Que la grâce guide vos pas.\n"); sys.exit()
+
+    j = creer_joueur()
+    noeud = "prologue"
+
+    while True:
+        if noeud in FINS_TERMINALES:
+            afficher_fin(j, noeud)
+            break
+        if noeud not in NOEUDS:
+            print(f"\n  [ERREUR] Nœud inconnu : '{noeud}'. Retour au prologue.")
+            noeud = "prologue"
+            continue
+        try:
+            prochain = NOEUDS[noeud](j)
+            noeud = prochain if prochain else noeud
+        except KeyboardInterrupt:
+            cls(); print("\n  Partie interrompue. À bientôt, Sans-Éclat.\n"); break
+
+if __name__ == "__main__":
+    main()
